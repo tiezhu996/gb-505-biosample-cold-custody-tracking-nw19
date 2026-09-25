@@ -17,6 +17,7 @@ func validSpecimen() Specimen {
 		ProtocolCode:     "PROTO-TEST-001",
 		State:            constants.SpecimenStateReceived,
 		VolumeML:         4.5,
+		InitialVolumeML:  4.5,
 		AliquotCount:     0,
 		CurrentCustodian: "样本接收员",
 		ReceivedAt:       received,
@@ -38,6 +39,73 @@ func TestSpecimenValidationTracksStorageInvariant(t *testing.T) {
 	specimen.Position = "R01-BX02-A03"
 	if err := specimen.Validate(); err != nil {
 		t.Fatalf("located stored specimen rejected: %v", err)
+	}
+}
+
+func TestSpecimenRemainingVolumeInvariant(t *testing.T) {
+	specimen := validSpecimen()
+	specimen.State = constants.SpecimenStateAliquoted
+	specimen.AliquotCount = 2
+	specimen.VolumeML = 1.5
+	if err := specimen.Validate(); err != nil {
+		t.Fatalf("aliquoted specimen with remaining volume rejected: %v", err)
+	}
+	specimen.VolumeML = 0
+	if err := specimen.Validate(); err != nil {
+		t.Fatalf("fully aliquoted specimen rejected: %v", err)
+	}
+	specimen.AliquotCount = 0
+	if err := specimen.Validate(); err == nil {
+		t.Fatal("aliquoted specimen without tubes must be rejected")
+	}
+	specimen = validSpecimen()
+	specimen.VolumeML = specimen.InitialVolumeML + 0.1
+	if err := specimen.Validate(); err == nil {
+		t.Fatal("remaining volume above received volume must be rejected")
+	}
+	fully := validSpecimen()
+	fully.State = constants.SpecimenStateStored
+	fully.AliquotCount = 1
+	fully.VolumeML = 0
+	containerID := uint(7)
+	fully.StorageContainerID = &containerID
+	fully.Position = "R01-BX02-A03"
+	if err := fully.Validate(); err != nil {
+		t.Fatalf("fully aliquoted stored specimen rejected: %v", err)
+	}
+}
+
+func TestAliquotTubeValidation(t *testing.T) {
+	tube := AliquotTube{SpecimenID: 1, TubeCode: "BIO-20260822-TEST-T01", VolumeML: 1.5, RegisteredByID: 2, RegisteredByName: "样本接收员"}
+	if err := tube.Validate(); err != nil {
+		t.Fatalf("valid aliquot tube rejected: %v", err)
+	}
+	for _, mutate := range []func(*AliquotTube){
+		func(candidate *AliquotTube) { candidate.TubeCode = "管编号" },
+		func(candidate *AliquotTube) { candidate.VolumeML = 0 },
+		func(candidate *AliquotTube) { candidate.RegisteredByName = "x" },
+	} {
+		invalid := tube
+		mutate(&invalid)
+		if err := invalid.Validate(); err == nil {
+			t.Fatal("invalid aliquot tube must be rejected")
+		}
+	}
+	if !validSpecimen().CanRegisterAliquots() {
+		t.Fatal("received specimens accept aliquot registration")
+	}
+	aliquoted := validSpecimen()
+	aliquoted.State = constants.SpecimenStateAliquoted
+	aliquoted.AliquotCount = 1
+	if !aliquoted.CanRegisterAliquots() {
+		t.Fatal("partially aliquoted specimens accept another batch")
+	}
+	for _, terminal := range []constants.SpecimenState{constants.SpecimenStateStored, constants.SpecimenStateReleased, constants.SpecimenStateDisposed} {
+		locked := validSpecimen()
+		locked.State = terminal
+		if locked.CanRegisterAliquots() {
+			t.Fatalf("%s specimen must not accept aliquot registration", terminal)
+		}
 	}
 }
 

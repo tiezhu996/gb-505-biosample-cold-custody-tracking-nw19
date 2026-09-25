@@ -33,6 +33,7 @@ export interface Specimen extends BaseEntity {
   storageContainer?: StorageContainer
   position?: string
   volumeMl: number
+  initialVolumeMl: number
   aliquotCount: number
   currentCustodian: string
   receivedAt: string
@@ -40,6 +41,22 @@ export interface Specimen extends BaseEntity {
   notes?: string
   transfers?: CustodyTransfer[]
   protocolReviews?: ProtocolReview[]
+  aliquotTubes?: AliquotTube[]
+}
+
+export interface AliquotTube extends BaseEntity {
+  specimenId: number
+  tubeCode: string
+  volumeMl: number
+  registeredById: number
+  registeredByName: string
+}
+
+export interface AliquotBatchResult {
+  specimen: Specimen
+  tubes: AliquotTube[]
+  totalMl: number
+  tubeCount: number
 }
 
 export interface CustodyTransfer extends BaseEntity {

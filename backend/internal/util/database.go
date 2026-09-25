@@ -85,10 +85,14 @@ func Migrate(db *gorm.DB) error {
 		&model.User{},
 		&model.StorageContainer{},
 		&model.Specimen{},
+		&model.AliquotTube{},
 		&model.CustodyTransfer{},
 		&model.ProtocolReview{},
 		&model.AuditLog{},
 	); err != nil {
+		return err
+	}
+	if err := backfillLegacyAliquots(db); err != nil {
 		return err
 	}
 	const immutableAuditFunction = `
@@ -125,6 +129,58 @@ func Ready(ctx context.Context, db *gorm.DB) error {
 		return err
 	}
 	return sqlDB.PingContext(ctx)
+}
+
+// backfillLegacyAliquots 把管级台账上线前的样本数据对齐到新模型：
+// 初始体积沿用历史体积；已登记份数的样本按等体积补建冻存管并把父样本扣为零剩余。
+// 三步都带存在性判断，重复执行不会重复写数据。
+func backfillLegacyAliquots(db *gorm.DB) error {
+	if err := db.Model(&model.Specimen{}).
+		Where("initial_volume_ml = 0 AND volume_ml > 0").
+		UpdateColumn("initial_volume_ml", gorm.Expr("volume_ml")).Error; err != nil {
+		return fmt.Errorf("backfill specimen initial volume: %w", err)
+	}
+	var legacy []model.Specimen
+	if err := db.Where("aliquot_count > 0").Find(&legacy).Error; err != nil {
+		return fmt.Errorf("load legacy aliquoted specimens: %w", err)
+	}
+	for _, specimen := range legacy {
+		var tubeCount int64
+		if err := db.Model(&model.AliquotTube{}).Where("specimen_id = ?", specimen.ID).Count(&tubeCount).Error; err != nil {
+			return err
+		}
+		if tubeCount > 0 {
+			continue
+		}
+		perTube := model.RoundVolume3(specimen.InitialVolumeML / float64(specimen.AliquotCount))
+		tubes := make([]model.AliquotTube, 0, specimen.AliquotCount)
+		for index := 1; index <= specimen.AliquotCount; index++ {
+			tubes = append(tubes, model.AliquotTube{
+				SpecimenID:       specimen.ID,
+				TubeCode:         fmt.Sprintf("%s-T%02d", specimen.AccessionNo, index),
+				VolumeML:         perTube,
+				RegisteredByID:   1,
+				RegisteredByName: "系统初始化",
+			})
+		}
+		if err := db.Create(&tubes).Error; err != nil {
+			return fmt.Errorf("backfill aliquot tubes for specimen %d: %w", specimen.ID, err)
+		}
+		var totalVolume float64
+		if err := db.Model(&model.AliquotTube{}).Where("specimen_id = ?", specimen.ID).
+			Select("COALESCE(SUM(volume_ml), 0)").Scan(&totalVolume).Error; err != nil {
+			return err
+		}
+		remaining := model.RoundVolume3(specimen.InitialVolumeML - totalVolume)
+		if remaining < 0 {
+			remaining = 0
+		}
+		if err := db.Model(&model.Specimen{}).Where("id = ?", specimen.ID).
+			UpdateColumn("volume_ml", remaining).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SeedDemoData is idempotent and only initializes an empty custody catalog.
@@ -194,12 +250,13 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 				State:              constants.SpecimenStateStored,
 				StorageContainerID: &containers[1].ID,
 				Position:           "R02-BX04-A03",
-				VolumeML:           4.5,
+				VolumeML:           1.5,
+				InitialVolumeML:    4.5,
 				AliquotCount:       3,
 				CurrentCustodian:   "冻存保管员",
 				ReceivedAt:         receivedOne,
 				ExpiresAt:          &expiresOne,
-				Notes:              "三支等体积分装",
+				Notes:              "三支分装，剩余 1.5 mL",
 			},
 			{
 				AccessionNo:        "BIO-20260820-014",
@@ -209,7 +266,8 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 				State:              constants.SpecimenStateStored,
 				StorageContainerID: &containers[1].ID,
 				Position:           "R04-BX01-C08",
-				VolumeML:           2.0,
+				VolumeML:           0,
+				InitialVolumeML:    2.0,
 				AliquotCount:       1,
 				CurrentCustodian:   "冻存保管员",
 				ReceivedAt:         receivedTwo,
@@ -224,6 +282,7 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 				StorageContainerID: &containers[0].ID,
 				Position:           "S03-BX07-D02",
 				VolumeML:           8.0,
+				InitialVolumeML:    8.0,
 				AliquotCount:       0,
 				CurrentCustodian:   "冻存保管员",
 				ReceivedAt:         receivedThree,
@@ -236,6 +295,7 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 				ProtocolCode:     "PROTO-IMMUNE-011",
 				State:            constants.SpecimenStateReceived,
 				VolumeML:         6.0,
+				InitialVolumeML:  6.0,
 				AliquotCount:     0,
 				CurrentCustodian: "样本接收员",
 				ReceivedAt:       receivedFour,
@@ -244,6 +304,16 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 		}
 		if err := tx.Create(&specimens).Error; err != nil {
 			return fmt.Errorf("seed specimens: %w", err)
+		}
+
+		seedTubes := []model.AliquotTube{
+			{SpecimenID: specimens[0].ID, TubeCode: specimens[0].AccessionNo + "-T01", VolumeML: 1.0, RegisteredByID: 1, RegisteredByName: "系统初始化"},
+			{SpecimenID: specimens[0].ID, TubeCode: specimens[0].AccessionNo + "-T02", VolumeML: 1.0, RegisteredByID: 1, RegisteredByName: "系统初始化"},
+			{SpecimenID: specimens[0].ID, TubeCode: specimens[0].AccessionNo + "-T03", VolumeML: 1.0, RegisteredByID: 1, RegisteredByName: "系统初始化"},
+			{SpecimenID: specimens[1].ID, TubeCode: specimens[1].AccessionNo + "-T01", VolumeML: 2.0, RegisteredByID: 1, RegisteredByName: "系统初始化"},
+		}
+		if err := tx.Create(&seedTubes).Error; err != nil {
+			return fmt.Errorf("seed aliquot tubes: %w", err)
 		}
 
 		acceptedAt := now.Add(-28 * time.Hour)

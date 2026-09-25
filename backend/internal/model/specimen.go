@@ -23,6 +23,7 @@ type Specimen struct {
 	StorageContainer   *StorageContainer       `json:"storageContainer,omitempty"`
 	Position           string                  `gorm:"size:120" json:"position,omitempty"`
 	VolumeML           float64                 `gorm:"type:numeric(12,3);not null" json:"volumeMl"`
+	InitialVolumeML    float64                 `gorm:"type:numeric(12,3);not null;default:0" json:"initialVolumeMl"`
 	AliquotCount       int                     `gorm:"not null;default:0" json:"aliquotCount"`
 	CurrentCustodian   string                  `gorm:"size:100;not null" json:"currentCustodian"`
 	ReceivedAt         time.Time               `gorm:"index;not null" json:"receivedAt"`
@@ -30,6 +31,7 @@ type Specimen struct {
 	Notes              string                  `gorm:"size:1000" json:"notes,omitempty"`
 	Transfers          []CustodyTransfer       `json:"transfers,omitempty"`
 	ProtocolReviews    []ProtocolReview        `json:"protocolReviews,omitempty"`
+	AliquotTubes       []AliquotTube           `gorm:"foreignKey:SpecimenID" json:"aliquotTubes,omitempty"`
 }
 
 func (s *Specimen) Normalize() {
@@ -42,6 +44,9 @@ func (s *Specimen) Normalize() {
 	s.Notes = strings.TrimSpace(s.Notes)
 	if s.State == "" {
 		s.State = constants.SpecimenStateReceived
+	}
+	if s.InitialVolumeML == 0 {
+		s.InitialVolumeML = s.VolumeML
 	}
 }
 
@@ -61,14 +66,24 @@ func (s Specimen) Validate() error {
 	if !s.State.Valid() {
 		return fmt.Errorf("unsupported specimen state: %s", s.State)
 	}
-	if s.VolumeML <= 0 || s.VolumeML > 100000 {
-		return fmt.Errorf("volume must be greater than zero and at most 100000 ml")
+	if s.InitialVolumeML <= 0 || s.InitialVolumeML > 100000 {
+		return fmt.Errorf("received volume must be greater than zero and at most 100000 ml")
+	}
+	if s.State == constants.SpecimenStateReceived {
+		if s.VolumeML <= 0 || s.VolumeML > 100000 {
+			return fmt.Errorf("remaining volume must be greater than zero and at most 100000 ml")
+		}
+	} else if s.VolumeML < 0 || s.VolumeML > 100000 {
+		return fmt.Errorf("remaining volume must be at least zero and at most 100000 ml")
+	}
+	if s.VolumeML > s.InitialVolumeML+1e-6 {
+		return fmt.Errorf("remaining volume cannot exceed the received volume")
 	}
 	if s.AliquotCount < 0 || s.AliquotCount > 10000 {
 		return fmt.Errorf("aliquot count must be between zero and 10000")
 	}
 	if s.State == constants.SpecimenStateAliquoted && s.AliquotCount < 1 {
-		return fmt.Errorf("aliquoted specimens must have at least one aliquot")
+		return fmt.Errorf("aliquoted specimens must have at least one aliquot tube")
 	}
 	if s.State == constants.SpecimenStateStored {
 		if s.StorageContainerID == nil || *s.StorageContainerID == 0 || s.Position == "" {
@@ -116,6 +131,11 @@ func (s Specimen) Expired(at time.Time) bool {
 
 func (s Specimen) Mutable() bool {
 	return s.State != constants.SpecimenStateDisposed
+}
+
+// CanRegisterAliquots 表示样本是否仍可登记分装冻存管；已冻存、放行或销毁后不再允许。
+func (s Specimen) CanRegisterAliquots() bool {
+	return s.State == constants.SpecimenStateReceived || s.State == constants.SpecimenStateAliquoted
 }
 
 func (s Specimen) HasPreparedTransfer() bool {

@@ -1,7 +1,7 @@
 import { apiClient, unwrap } from './client'
 import type {
-  AuditLog, CustodyTransfer, PageResult, ProtocolReview, ReviewDecision,
-  Specimen, SpecimenState, StorageContainer, TransferState, User,
+  AliquotBatchResult, AliquotTube, AuditLog, CustodyTransfer, PageResult, ProtocolReview,
+  ReviewDecision, Specimen, SpecimenState, StorageContainer, TransferState, User,
 } from '../types/domain'
 
 export interface PageParams { page?: number; pageSize?: number; search?: string }
@@ -29,11 +29,18 @@ export const specimenAPI = {
   get: (id: number) => unwrap<Specimen>(apiClient.get(`/specimens/${id}`)),
   create: (payload: {
     accessionNo: string; sampleType: string; subjectCode: string; protocolCode: string;
-    volumeMl: number; aliquotCount: number; currentCustodian: string; receivedAt?: string; notes?: string;
+    volumeMl: number; currentCustodian: string; receivedAt?: string; notes?: string;
   }) => unwrap<Specimen>(apiClient.post('/specimens', payload)),
-  update: (id: number, payload: Partial<Specimen>) => unwrap<Specimen>(apiClient.patch(`/specimens/${id}`, payload)),
+  update: (id: number, payload: Partial<Omit<Specimen, 'aliquotCount' | 'initialVolumeMl'>>) =>
+    unwrap<Specimen>(apiClient.patch(`/specimens/${id}`, payload)),
   transition: (id: number, state: SpecimenState, reason = '') =>
     unwrap<Specimen>(apiClient.post(`/specimens/${id}/transition`, { state, reason })),
+}
+
+export const aliquotAPI = {
+  list: (specimenId: number) => unwrap<AliquotTube[]>(apiClient.get(`/specimens/${specimenId}/aliquot-tubes`)),
+  register: (specimenId: number, tubes: { tubeCode: string; volumeMl: number }[]) =>
+    unwrap<AliquotBatchResult>(apiClient.post(`/specimens/${specimenId}/aliquot-tubes`, { tubes })),
 }
 
 export const transferAPI = {

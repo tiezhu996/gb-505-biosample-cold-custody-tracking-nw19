@@ -58,7 +58,7 @@ func (r *specimenRepository) List(ctx context.Context, filter SpecimenFilter) ([
 		return nil, 0, err
 	}
 	items := make([]model.Specimen, 0)
-	err := db.Preload("StorageContainer").Preload("Transfers", func(tx *gorm.DB) *gorm.DB {
+	err := db.Preload("StorageContainer").Preload("AliquotTubes").Preload("Transfers", func(tx *gorm.DB) *gorm.DB {
 		return tx.Order("prepared_at DESC").Limit(10)
 	}).Preload("ProtocolReviews", func(tx *gorm.DB) *gorm.DB {
 		return tx.Order("reviewed_at DESC").Limit(10)
@@ -70,6 +70,7 @@ func (r *specimenRepository) Find(ctx context.Context, id uint) (*model.Specimen
 	var item model.Specimen
 	err := r.db.WithContext(ctx).
 		Preload("StorageContainer").
+		Preload("AliquotTubes").
 		Preload("Transfers", func(tx *gorm.DB) *gorm.DB { return tx.Order("prepared_at DESC") }).
 		Preload("Transfers.ToContainer").
 		Preload("ProtocolReviews", func(tx *gorm.DB) *gorm.DB { return tx.Order("reviewed_at DESC") }).

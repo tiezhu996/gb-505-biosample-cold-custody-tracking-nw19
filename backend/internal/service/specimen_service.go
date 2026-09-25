@@ -69,7 +69,8 @@ func (s *specimenService) Create(ctx context.Context, actor Actor, input dto.Cre
 		ProtocolCode:     input.ProtocolCode,
 		State:            constants.SpecimenStateReceived,
 		VolumeML:         input.VolumeML,
-		AliquotCount:     input.AliquotCount,
+		InitialVolumeML:  input.VolumeML,
+		AliquotCount:     0,
 		CurrentCustodian: input.CurrentCustodian,
 		ReceivedAt:       receivedAt,
 		ExpiresAt:        input.ExpiresAt,
@@ -107,10 +108,11 @@ func (s *specimenService) Update(ctx context.Context, actor Actor, id uint, inpu
 		item.ProtocolCode = *input.ProtocolCode
 	}
 	if input.VolumeML != nil {
+		if item.State != constants.SpecimenStateReceived || item.AliquotCount > 0 {
+			return nil, util.Conflict("样本已开始分装，体积以冻存管台账为准，不能直接修改")
+		}
 		item.VolumeML = *input.VolumeML
-	}
-	if input.AliquotCount != nil {
-		item.AliquotCount = *input.AliquotCount
+		item.InitialVolumeML = *input.VolumeML
 	}
 	if input.CurrentCustodian != nil {
 		if item.HasPreparedTransfer() {
@@ -140,6 +142,9 @@ func (s *specimenService) Update(ctx context.Context, actor Actor, id uint, inpu
 func (s *specimenService) Transition(ctx context.Context, actor Actor, id uint, next constants.SpecimenState, reason string) (*model.Specimen, error) {
 	if next == constants.SpecimenStateReleased {
 		return nil, util.Forbidden("样本放行只能由协议复核批准完成")
+	}
+	if next == constants.SpecimenStateAliquoted {
+		return nil, util.Forbidden("已分装状态只能通过登记冻存管完成")
 	}
 	current, err := s.repo.Find(ctx, id)
 	if err != nil {
