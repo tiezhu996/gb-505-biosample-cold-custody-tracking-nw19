@@ -23,6 +23,7 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	userRepo := repository.NewUserRepository(db)
 	storageRepo := repository.NewStorageRepository(db)
 	specimenRepo := repository.NewSpecimenRepository(db)
+	aliquotRepo := repository.NewAliquotRepository(db)
 	transferRepo := repository.NewTransferRepository(db)
 	protocolRepo := repository.NewProtocolRepository(db)
 
@@ -30,6 +31,7 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.TokenTTL)
 	storageService := service.NewStorageService(storageRepo, auditService)
 	specimenService := service.NewSpecimenService(specimenRepo, auditService)
+	aliquotService := service.NewAliquotService(aliquotRepo, specimenRepo, auditService)
 	transferService := service.NewTransferService(transferRepo, specimenRepo, auditService)
 	protocolService := service.NewProtocolService(protocolRepo, specimenRepo, transferRepo, auditService, objectStore, cfg.MinIOBucket)
 
@@ -40,6 +42,7 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	authHandler := handler.NewAuthHandler(authService)
 	storageHandler := handler.NewStorageHandler(storageService)
 	specimenHandler := handler.NewSpecimenHandler(specimenService)
+	aliquotHandler := handler.NewAliquotHandler(aliquotService)
 	transferHandler := handler.NewTransferHandler(transferService)
 	protocolHandler := handler.NewProtocolHandler(protocolService)
 	auditHandler := handler.NewAuditHandler(auditService)
@@ -69,6 +72,8 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	secured.POST("/specimens", middleware.RequirePermission("specimen:create"), specimenHandler.Create)
 	secured.PATCH("/specimens/:id", middleware.RequirePermission("specimen:update"), specimenHandler.Update)
 	secured.POST("/specimens/:id/transition", middleware.RequirePermission("specimen:transition"), specimenHandler.Transition)
+	secured.GET("/specimens/:id/aliquots", aliquotHandler.List)
+	secured.POST("/specimens/:id/aliquots", middleware.RequirePermission("specimen:transition"), aliquotHandler.Register)
 
 	secured.GET("/custody-transfers", transferHandler.List)
 	secured.GET("/custody-transfers/:id", transferHandler.Get)

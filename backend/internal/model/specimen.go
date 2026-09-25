@@ -30,6 +30,7 @@ type Specimen struct {
 	Notes              string                  `gorm:"size:1000" json:"notes,omitempty"`
 	Transfers          []CustodyTransfer       `json:"transfers,omitempty"`
 	ProtocolReviews    []ProtocolReview        `json:"protocolReviews,omitempty"`
+	Aliquots           []SpecimenAliquot       `json:"aliquots,omitempty"`
 }
 
 func (s *Specimen) Normalize() {
@@ -61,8 +62,8 @@ func (s Specimen) Validate() error {
 	if !s.State.Valid() {
 		return fmt.Errorf("unsupported specimen state: %s", s.State)
 	}
-	if s.VolumeML <= 0 || s.VolumeML > 100000 {
-		return fmt.Errorf("volume must be greater than zero and at most 100000 ml")
+	if s.VolumeML < 0 || s.VolumeML > 100000 {
+		return fmt.Errorf("remaining volume must be at least zero and at most 100000 ml")
 	}
 	if s.AliquotCount < 0 || s.AliquotCount > 10000 {
 		return fmt.Errorf("aliquot count must be between zero and 10000")

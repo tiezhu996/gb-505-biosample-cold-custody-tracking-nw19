@@ -40,6 +40,18 @@ export interface Specimen extends BaseEntity {
   notes?: string
   transfers?: CustodyTransfer[]
   protocolReviews?: ProtocolReview[]
+  aliquots?: SpecimenAliquot[]
+}
+
+export interface SpecimenAliquot extends BaseEntity {
+  specimenId: number
+  tubeCode: string
+  volumeMl: number
+  batch: number
+  registeredById: number
+  registeredByName: string
+  registeredAt: string
+  notes?: string
 }
 
 export interface CustodyTransfer extends BaseEntity {

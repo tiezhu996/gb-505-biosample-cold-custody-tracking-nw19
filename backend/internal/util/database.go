@@ -85,6 +85,7 @@ func Migrate(db *gorm.DB) error {
 		&model.User{},
 		&model.StorageContainer{},
 		&model.Specimen{},
+		&model.SpecimenAliquot{},
 		&model.CustodyTransfer{},
 		&model.ProtocolReview{},
 		&model.AuditLog{},
@@ -244,6 +245,40 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 		}
 		if err := tx.Create(&specimens).Error; err != nil {
 			return fmt.Errorf("seed specimens: %w", err)
+		}
+
+		aliquotRegisteredAt := now.Add(-70 * time.Hour)
+		aliquots := []model.SpecimenAliquot{
+			{
+				SpecimenID:       specimens[0].ID,
+				TubeCode:         "BIO-20260819-001-A1",
+				VolumeML:         1.5,
+				Batch:            1,
+				RegisteredByID:   1,
+				RegisteredByName: "系统初始化",
+				RegisteredAt:     aliquotRegisteredAt,
+			},
+			{
+				SpecimenID:       specimens[0].ID,
+				TubeCode:         "BIO-20260819-001-A2",
+				VolumeML:         1.5,
+				Batch:            1,
+				RegisteredByID:   1,
+				RegisteredByName: "系统初始化",
+				RegisteredAt:     aliquotRegisteredAt,
+			},
+			{
+				SpecimenID:       specimens[0].ID,
+				TubeCode:         "BIO-20260819-001-A3",
+				VolumeML:         1.5,
+				Batch:            1,
+				RegisteredByID:   1,
+				RegisteredByName: "系统初始化",
+				RegisteredAt:     aliquotRegisteredAt,
+			},
+		}
+		if err := tx.Create(&aliquots).Error; err != nil {
+			return fmt.Errorf("seed specimen aliquots: %w", err)
 		}
 
 		acceptedAt := now.Add(-28 * time.Hour)

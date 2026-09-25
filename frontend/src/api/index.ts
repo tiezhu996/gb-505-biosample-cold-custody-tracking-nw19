@@ -1,7 +1,7 @@
 import { apiClient, unwrap } from './client'
 import type {
   AuditLog, CustodyTransfer, PageResult, ProtocolReview, ReviewDecision,
-  Specimen, SpecimenState, StorageContainer, TransferState, User,
+  Specimen, SpecimenAliquot, SpecimenState, StorageContainer, TransferState, User,
 } from '../types/domain'
 
 export interface PageParams { page?: number; pageSize?: number; search?: string }
@@ -34,6 +34,9 @@ export const specimenAPI = {
   update: (id: number, payload: Partial<Specimen>) => unwrap<Specimen>(apiClient.patch(`/specimens/${id}`, payload)),
   transition: (id: number, state: SpecimenState, reason = '') =>
     unwrap<Specimen>(apiClient.post(`/specimens/${id}/transition`, { state, reason })),
+  listAliquots: (id: number) => unwrap<SpecimenAliquot[]>(apiClient.get(`/specimens/${id}/aliquots`)),
+  registerAliquots: (id: number, tubes: { tubeCode: string; volumeMl: number; notes?: string }[]) =>
+    unwrap<Specimen>(apiClient.post(`/specimens/${id}/aliquots`, { tubes })),
 }
 
 export const transferAPI = {

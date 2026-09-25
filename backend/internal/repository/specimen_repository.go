@@ -73,6 +73,7 @@ func (r *specimenRepository) Find(ctx context.Context, id uint) (*model.Specimen
 		Preload("Transfers", func(tx *gorm.DB) *gorm.DB { return tx.Order("prepared_at DESC") }).
 		Preload("Transfers.ToContainer").
 		Preload("ProtocolReviews", func(tx *gorm.DB) *gorm.DB { return tx.Order("reviewed_at DESC") }).
+		Preload("Aliquots", func(tx *gorm.DB) *gorm.DB { return tx.Order("registered_at DESC, id DESC") }).
 		First(&item, id).Error
 	return &item, err
 }

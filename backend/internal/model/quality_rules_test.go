@@ -41,6 +41,44 @@ func TestSpecimenValidationTracksStorageInvariant(t *testing.T) {
 	}
 }
 
+func TestSpecimenAllowsFullyAliquotedRemainder(t *testing.T) {
+	specimen := validSpecimen()
+	specimen.State = constants.SpecimenStateAliquoted
+	specimen.AliquotCount = 3
+	specimen.VolumeML = 0
+	if err := specimen.Validate(); err != nil {
+		t.Fatalf("aliquoted specimen with zero remaining volume rejected: %v", err)
+	}
+	specimen.VolumeML = -0.5
+	if err := specimen.Validate(); err == nil {
+		t.Fatal("negative remaining volume must be rejected")
+	}
+}
+
+func TestSpecimenAliquotValidation(t *testing.T) {
+	aliquot := SpecimenAliquot{
+		SpecimenID:       1,
+		TubeCode:         "BIO-20260822-004-A1",
+		VolumeML:         0.5,
+		Batch:            1,
+		RegisteredByID:   2,
+		RegisteredByName: "样本接收员",
+		RegisteredAt:     time.Now(),
+	}
+	if err := aliquot.Validate(); err != nil {
+		t.Fatalf("valid aliquot rejected: %v", err)
+	}
+	aliquot.TubeCode = "bad tube"
+	if err := aliquot.Validate(); err == nil {
+		t.Fatal("aliquot with malformed tube code must be rejected")
+	}
+	aliquot.TubeCode = "BIO-20260822-004-A1"
+	aliquot.VolumeML = 0
+	if err := aliquot.Validate(); err == nil {
+		t.Fatal("aliquot without a positive volume must be rejected")
+	}
+}
+
 func TestStorageContainerTemperatureAndCapacity(t *testing.T) {
 	container := StorageContainer{
 		Code: "FZ-80-01", Name: "负八十度一号柜", ContainerType: "ultra_low_freezer",

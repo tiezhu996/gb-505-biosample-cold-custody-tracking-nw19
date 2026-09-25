@@ -5,11 +5,12 @@
 ## 主要流程
 
 1. 接收专员登记样本接收号、脱敏受试者编码、来源协议、体积和当前保管人。
-2. 保管员维护冷冻柜或液氮罐，发起交接并由另一名有权限的人员接收；接收成功后样本位置、格位、状态和容器占用量在同一事务内更新。
-3. 协议复核员核验知情同意、使用范围、保留期限和可选的 MinIO 协议文件对象。通过复核会放行已冻存样本，暂缓或拒绝必须填写说明。
-4. 所有关键写操作记录请求 ID、操作者、前后状态、前后位置和保管人，并使用 SHA-256 前向哈希形成只追加审计链。
+2. 接收后的样本按管登记分装台账：每管记录冻存管编号和体积，登记成功后样本状态变为已分装，父样本剩余体积扣掉各管之和；单批合计超过当前剩余体积时整批拒绝写入，父样本体积、管数和状态保持原样。已冻存、放行或销毁的样本不再允许登记分装。
+3. 保管员维护冷冻柜或液氮罐，发起交接并由另一名有权限的人员接收；接收成功后样本位置、格位、状态和容器占用量在同一事务内更新。
+4. 协议复核员核验知情同意、使用范围、保留期限和可选的 MinIO 协议文件对象。通过复核会放行已冻存样本，暂缓或拒绝必须填写说明。
+5. 所有关键写操作记录请求 ID、操作者、前后状态、前后位置和保管人，并使用 SHA-256 前向哈希形成只追加审计链。
 
-首次启动会幂等创建 3 个冻存容器、4 份样本、2 条交接记录和 1 条协议复核记录，便于直接验证完整流程。
+首次启动会幂等创建 3 个冻存容器、4 份样本、3 条分装台账、2 条交接记录和 1 条协议复核记录，便于直接验证完整流程。
 
 ## 技术结构
 
@@ -89,6 +90,8 @@ docker compose down -v
 | `GET /api/specimens[/:id]` | 查询样本和交接链 | 已登录 |
 | `POST /api/specimens` / `PATCH /api/specimens/:id` | 接收和更新样本 | `specimen:create` / `specimen:update` |
 | `POST /api/specimens/:id/transition` | 分装或处置状态变更 | `specimen:transition` |
+| `GET /api/specimens/:id/aliquots` | 查询样本的冻存管台账 | 已登录 |
+| `POST /api/specimens/:id/aliquots` | 按管登记分装并扣减剩余体积 | `specimen:transition` |
 | `GET /api/custody-transfers[/:id]` | 查询交接 | 已登录 |
 | `POST /api/custody-transfers` | 发起交接 | `transfer:prepare` |
 | `POST /api/custody-transfers/:id/resolve` | 接收、拒绝或取消交接 | `transfer:resolve` |
@@ -147,7 +150,7 @@ docker compose config --quiet
 
 `SpecimenState` 固定为 `received`、`aliquoted`、`stored`、`released`、`disposed`。
 
-- 后端：`internal/constants/specimen_state.go`、`internal/model/specimen.go`、`internal/dto/common.go`、`internal/handler/specimen_handler.go`、`internal/repository/specimen_repository.go`、`internal/repository/transfer_repository.go`、`internal/repository/protocol_repository.go`、`internal/service/specimen_service.go`、`internal/service/protocol_service.go`、`internal/util/database.go`
+- 后端：`internal/constants/specimen_state.go`、`internal/model/specimen.go`、`internal/dto/common.go`、`internal/handler/specimen_handler.go`、`internal/repository/specimen_repository.go`、`internal/repository/aliquot_repository.go`、`internal/repository/transfer_repository.go`、`internal/repository/protocol_repository.go`、`internal/service/specimen_service.go`、`internal/service/protocol_service.go`、`internal/util/database.go`
 - 前端：`src/types/domain.ts`、`src/api/index.ts`、`src/stores/specimenStore.ts`、`src/components/common/CustodyBadge.tsx`、`src/components/common/SampleDrawer.tsx`、`src/pages/SpecimensPage.tsx`、`src/pages/SpecimenDetailPage.tsx`、`src/pages/TransfersPage.tsx`、`src/pages/ProtocolsPage.tsx`
 - 测试：`internal/constants/specimen_state_test.go`、`internal/model/quality_rules_test.go`
 

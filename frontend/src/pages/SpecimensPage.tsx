@@ -1,5 +1,5 @@
-import { EyeOutlined, ForkOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
-import { Button, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from 'antd'
+import { DeleteOutlined, EyeOutlined, ForkOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { Alert, Button, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
 import { specimenAPI } from '../api'
@@ -11,6 +11,8 @@ import { usePagination } from '../hooks/usePagination'
 import { useSpecimenStore } from '../stores/specimenStore'
 import type { Specimen, SpecimenState } from '../types/domain'
 import { formatDateTime } from '../utils/format'
+
+interface AliquotTubeFormValue { tubeCode: string; volumeMl?: number; notes?: string }
 
 export function SpecimensPage() {
   const { data, loading, load } = useSpecimenStore()
@@ -24,6 +26,10 @@ export function SpecimensPage() {
   const [selected, setSelected] = useState<Specimen | null>(null)
   const [form] = Form.useForm()
   const [aliquotForm] = Form.useForm()
+  const tubes: AliquotTubeFormValue[] = Form.useWatch('tubes', aliquotForm) ?? []
+  const batchTotal = tubes.reduce((sum, tube) => sum + (Number(tube?.volumeMl) || 0), 0)
+  const remaining = aliquotTarget?.volumeMl ?? 0
+  const exceeded = Boolean(aliquotTarget) && batchTotal - remaining > 1e-9
   const refresh = () => load({ page: pagination.page, pageSize: pagination.pageSize, search, state })
   useEffect(() => { void refresh() }, [pagination.page, pagination.pageSize, state])
 
@@ -39,14 +45,17 @@ export function SpecimensPage() {
     } finally { setSaving(false) }
   }
   const show = async (specimen: Specimen) => setSelected(await specimenAPI.get(specimen.id))
-  const markAliquoted = async () => {
+  const openAliquotModal = (row: Specimen) => {
+    setAliquotTarget(row)
+    aliquotForm.setFieldsValue({ tubes: [{ tubeCode: `${row.accessionNo}-A${row.aliquotCount + 1}`, notes: '' }] })
+  }
+  const registerAliquots = async () => {
     if (!aliquotTarget) return
-    const { aliquotCount } = await aliquotForm.validateFields()
+    const { tubes: values } = await aliquotForm.validateFields()
     setSaving(true)
     try {
-      if (aliquotCount !== aliquotTarget.aliquotCount) await specimenAPI.update(aliquotTarget.id, { aliquotCount })
-      await specimenAPI.transition(aliquotTarget.id, 'aliquoted', '完成分装并核对标签')
-      message.success('样本已标记为分装完成')
+      await specimenAPI.registerAliquots(aliquotTarget.id, values)
+      message.success(`已登记 ${values.length} 管分装，样本状态更新为已分装`)
       setAliquotTarget(null)
       aliquotForm.resetFields()
       await refresh()
@@ -60,9 +69,9 @@ export function SpecimensPage() {
     { title: '状态', dataIndex: 'state', render: (value) => <CustodyBadge state={value} /> },
     { title: '冻存位置', render: (_, row) => row.storageContainer ? `${row.storageContainer.code} / ${row.position || '-'}` : '待分配' },
     { title: '当前保管人', dataIndex: 'currentCustodian' },
-    { title: '体积/分装', render: (_, row) => `${row.volumeMl} mL / ${row.aliquotCount} 份` },
+    { title: '剩余体积/管数', render: (_, row) => `${row.volumeMl} mL / ${row.aliquotCount} 管` },
     { title: '接收时间', dataIndex: 'receivedAt', render: formatDateTime },
-    { title: '操作', fixed: 'right', render: (_, row) => <Space><Button size="small" icon={<EyeOutlined />} onClick={() => void show(row)}>详情</Button>{row.state === 'received' && can('specimen:transition') && <Button size="small" icon={<ForkOutlined />} onClick={() => { setAliquotTarget(row); aliquotForm.setFieldsValue({ aliquotCount: Math.max(row.aliquotCount, 1) }) }}>完成分装</Button>}</Space> },
+    { title: '操作', fixed: 'right', render: (_, row) => <Space><Button size="small" icon={<EyeOutlined />} onClick={() => void show(row)}>详情</Button>{(row.state === 'received' || row.state === 'aliquoted') && can('specimen:transition') && <Button size="small" icon={<ForkOutlined />} onClick={() => openAliquotModal(row)}>登记分装</Button>}</Space> },
   ]
   return (
     <div className="page-stack">
@@ -77,8 +86,28 @@ export function SpecimensPage() {
           <Form.Item name="notes" label="接收备注"><Input.TextArea rows={3} maxLength={1000} showCount /></Form.Item>
         </Form>
       </Modal>
-      <Modal title={`完成分装 · ${aliquotTarget?.accessionNo || ''}`} open={Boolean(aliquotTarget)} confirmLoading={saving} onOk={() => void markAliquoted()} onCancel={() => setAliquotTarget(null)} okText="确认完成" cancelText="取消">
-        <Form form={aliquotForm} layout="vertical"><Form.Item name="aliquotCount" label="实际分装份数" rules={[{ required: true }]}><InputNumber min={1} max={10000} precision={0} style={{ width: '100%' }} /></Form.Item></Form>
+      <Modal width={720} title={`登记分装 · ${aliquotTarget?.accessionNo || ''}`} open={Boolean(aliquotTarget)} confirmLoading={saving} okButtonProps={{ disabled: exceeded }} onOk={() => void registerAliquots()} onCancel={() => setAliquotTarget(null)} okText="确认登记" cancelText="取消">
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Typography.Text type="secondary">当前剩余体积 {remaining} mL，已登记 {aliquotTarget?.aliquotCount ?? 0} 管；本批合计 {batchTotal.toFixed(3)} mL，登记后剩余 {Math.max(remaining - batchTotal, 0).toFixed(3)} mL。</Typography.Text>
+          {exceeded && <Alert type="error" showIcon message={`本批合计 ${batchTotal.toFixed(3)} mL 超过剩余体积 ${remaining} mL，请核减后再提交`} />}
+          <Form form={aliquotForm} layout="vertical">
+            <Form.List name="tubes">
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map((field, index) => (
+                    <Row gutter={12} key={field.key} align="middle">
+                      <Col span={9}><Form.Item name={[field.name, 'tubeCode']} label={index === 0 ? '冻存管编号' : undefined} rules={[{ required: true, message: '请输入管编号' }, { min: 3, max: 50, message: '长度 3-50 字符' }]}><Input placeholder="BIO-20260822-004-A1" /></Form.Item></Col>
+                      <Col span={6}><Form.Item name={[field.name, 'volumeMl']} label={index === 0 ? '体积 (mL)' : undefined} rules={[{ required: true, message: '请输入体积' }]}><InputNumber min={0.001} max={10000} precision={3} step={0.5} style={{ width: '100%' }} /></Form.Item></Col>
+                      <Col span={7}><Form.Item name={[field.name, 'notes']} label={index === 0 ? '备注' : undefined}><Input maxLength={500} placeholder="可选" /></Form.Item></Col>
+                      <Col span={2}><Button type="text" danger icon={<DeleteOutlined />} disabled={fields.length <= 1} onClick={() => remove(field.name)} /></Col>
+                    </Row>
+                  ))}
+                  <Button block type="dashed" icon={<PlusOutlined />} disabled={fields.length >= 100} onClick={() => add({ tubeCode: aliquotTarget ? `${aliquotTarget.accessionNo}-A${(aliquotTarget.aliquotCount ?? 0) + fields.length + 1}` : '', notes: '' })}>添加一管</Button>
+                </>
+              )}
+            </Form.List>
+          </Form>
+        </Space>
       </Modal>
       <SampleDrawer specimen={selected} open={Boolean(selected)} onClose={() => setSelected(null)} />
     </div>
